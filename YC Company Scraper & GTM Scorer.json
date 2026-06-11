@@ -1,0 +1,783 @@
+{
+  "name": "YC Company Scraper & GTM Scorer",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "weeks",
+              "triggerAtHour": 6
+            }
+          ]
+        }
+      },
+      "id": "2aba0233-76cf-4bc9-a860-d4efcfdcaee3",
+      "name": "Weekly Schedule — Sunday 6am",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        0,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://yc-oss.github.io/api/companies/all.json",
+        "options": {}
+      },
+      "id": "05c0beb2-f110-428d-95fe-5024dbdf97fe",
+      "name": "Fetch All YC Companies",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        224,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst TARGET_TAGS = new Set(['b2b','saas','sales','marketing','analytics','crm','enterprise','ai','automation','fintech','hr tech','developer tools','revenue']);\nconst allItems = $input.all();\nconst filtered = allItems.filter(item => {\n  const c = item.json;\n  if (!c || !c.name) return false;\n  if (c.status === 'Inactive' || c.status === 'Dead') return false;\n  const size = parseInt(c.team_size) || 0;\n  if (size < 10 || size > 150) return false;\n  const tags = Array.isArray(c.tags) ? c.tags.map(t => String(t).toLowerCase()) : [];\n  return tags.some(t => TARGET_TAGS.has(t));\n});\nreturn filtered.map(item => ({ json: item.json }));\n"
+      },
+      "id": "8c3a7244-4537-4e63-b013-bfe4bfd66e5f",
+      "name": "Filter by ICP Criteria",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        448,
+        192
+      ],
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "1HML_e_Ssv6SbRhaTkyQ6gN807onNs5u4fjolX4C7kQA",
+          "mode": "list",
+          "cachedResultName": "Y Combinator",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1HML_e_Ssv6SbRhaTkyQ6gN807onNs5u4fjolX4C7kQA/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 987273948,
+          "mode": "list",
+          "cachedResultName": "Master Tracker",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1HML_e_Ssv6SbRhaTkyQ6gN807onNs5u4fjolX4C7kQA/edit#gid=987273948"
+        },
+        "options": {}
+      },
+      "id": "7e5f6120-0760-4ca0-9314-a5489360125d",
+      "name": "Read Existing Slugs from Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        672,
+        192
+      ],
+      "executeOnce": true,
+      "alwaysOutputData": true,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "gFHCIe3QxodFLCCc",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "\nlet existingSlugs = new Set();\ntry {\n  const sheetRows = $('Read Existing Slugs from Sheet').all();\n  for (const row of sheetRows) {\n    const slug = row.json['YC Slug'] || '';\n    if (slug) existingSlugs.add(String(slug).trim().toLowerCase());\n  }\n} catch(e) {}\nconst filtered = $('Filter by ICP Criteria').all();\nconst newCompanies = filtered.filter(item => {\n  const slug = String(item.json.slug || '').trim().toLowerCase();\n  return slug && !existingSlugs.has(slug);\n});\nreturn newCompanies.map(item => ({ json: item.json }));\n"
+      },
+      "id": "beb914b8-1f37-40b6-a361-ed9e9e3d9d60",
+      "name": "Remove Already Scraped Companies",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        896,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { status: 'done', message: 'All companies written to sheet' } }];"
+      },
+      "id": "addfbafc-7749-4c0f-aba4-ac40fb6edb0f",
+      "name": "Log Completion",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1344,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "\nreturn $input.all().map(function(item) {\n  var c = item.json;\n  var score = 0;\n  var tags = Array.isArray(c.tags) ? c.tags.join(', ').toLowerCase() : String(c.tags || '').toLowerCase();\n  var industry = String(c.industry || '').toLowerCase();\n  var size = parseInt(c.team_size) || 0;\n  if (size >= 15 && size <= 80) score += 15;\n  if (c.isHiring === false || c.isHiring === 'No') score += 20;\n  if (tags.indexOf('sales') > -1 || tags.indexOf('crm') > -1 || tags.indexOf('revenue') > -1) score += 20;\n  if (tags.indexOf('b2b') > -1 && tags.indexOf('saas') > -1) score += 15;\n  if (tags.indexOf('automation') > -1 || tags.indexOf('analytics') > -1) score += 10;\n  if (industry.indexOf('fintech') > -1 || industry.indexOf('hr') > -1 || industry.indexOf('enterprise') > -1) score += 10;\n  var finalScore = Math.min(score, 100);\n  var icpFit = finalScore >= 60 ? 'High' : finalScore >= 35 ? 'Medium' : 'Low';\n  var priority = finalScore >= 60 ? '1' : finalScore >= 35 ? '2' : '3';\n  var tagsStr = Array.isArray(c.tags) ? c.tags.join(', ') : String(c.tags || '');\n  var regionsStr = Array.isArray(c.regions) ? c.regions.join(', ') : String(c.regions || '');\n\n  return {\n    json: {\n      'Company Name': c.name || '',\n      'YC Slug': c.slug || '',\n      'Batch': c.batch || '',\n      'Status': c.status || '',\n      'Team Size': size,\n      'Industry': c.industry || '',\n      'Sub-industry': c.subindustry || '',\n      'Tags': tagsStr,\n      'Is Hiring': c.isHiring === true ? 'Yes' : c.isHiring === false ? 'No' : '',\n      'Stage': c.stage || '',\n      'Top Company': c.top_company === true ? 'Yes' : '',\n      'Website': c.website || '',\n      'YC Profile URL': c.url || ('https://www.ycombinator.com/companies/' + (c.slug || '')),\n      'LinkedIn URL': c.linkedin_url || '',\n      'Crunchbase URL': c.cb_url || '',\n      'Regions': regionsStr,\n      'HubSpot?': '',\n      'Intercom?': '',\n      'Segment?': '',\n      'Mixpanel?': '',\n      'GA4?': '',\n      'Drift?': '',\n      'Apollo?': '',\n      'SalesLoft?': '',\n      'Open Roles': '',\n      'GTM Roles': '',\n      'Latest GTM Role': '',\n      'Days Since Post': '',\n      'GTM Gap Score': finalScore,\n      'ICP Fit': icpFit,\n      'Priority': priority,\n      'One-Liner': c.one_liner || '',\n      'AI Hook': '',\n      'Outreach Status': 'Not Started',\n      'Contact LinkedIn': '',\n      'Notes': '',\n      _name: c.name || '',\n      _one_liner: c.one_liner || '',\n      _tags: tagsStr,\n      _team_size: size,\n      _gtm_score: finalScore\n    }\n  };\n});\n"
+      },
+      "id": "b7d1b425-9b84-4312-a412-09b3fc901a49",
+      "name": "Compute GTM Gap Score",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1344,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "\nvar c = $input.item.json;\nvar body = {\n  model: 'anthropic/claude-haiku-4.5',\n  max_tokens: 120,\n  messages: [\n    { role: 'system', content: 'You write ultra-short cold email openers (1 sentence max). You are Saswati, a GTM Engineer. Be specific, human, no buzzwords.' },\n    { role: 'user', content: 'Company: ' + c._name + '. What they do: ' + c._one_liner + '. Tags: ' + c._tags + '. Team: ' + c._team_size + ' people. GTM score: ' + c._gtm_score + '/100. Write one sentence.' }\n  ]\n};\nreturn { json: { ...c, _hook_body: JSON.stringify(body) } };\n"
+      },
+      "id": "2867f325-3948-44d5-a9b8-998cf0fda68c",
+      "name": "Build Hook Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1568,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://openrouter.ai/api/v1/chat/completions",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Key"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json._hook_body }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "cad43d5b-bd0b-4119-a7e1-e023f01474de",
+      "name": "Hook Generator",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1792,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "\nvar item = $input.item.json;\nvar hookText = '';\ntry { hookText = (item.choices[0].message.content || '').trim(); } catch(e) {}\nreturn {\n  json: {\n    'Company Name': item['Company Name'] || '',\n    'YC Slug': item['YC Slug'] || '',\n    'Batch': item['Batch'] || '',\n    'Status': item['Status'] || '',\n    'Team Size': item['Team Size'] || '',\n    'Industry': item['Industry'] || '',\n    'Sub-industry': item['Sub-industry'] || '',\n    'Tags': item['Tags'] || '',\n    'Is Hiring': item['Is Hiring'] || '',\n    'Stage': item['Stage'] || '',\n    'Top Company': item['Top Company'] || '',\n    'Website': item['Website'] || '',\n    'YC Profile URL': item['YC Profile URL'] || '',\n    'LinkedIn URL': item['LinkedIn URL'] || '',\n    'Crunchbase URL': item['Crunchbase URL'] || '',\n    'Regions': item['Regions'] || '',\n    'HubSpot?': '',\n    'Intercom?': '',\n    'Segment?': '',\n    'Mixpanel?': '',\n    'GA4?': '',\n    'Drift?': '',\n    'Apollo?': '',\n    'SalesLoft?': '',\n    'Open Roles': '',\n    'GTM Roles': '',\n    'Latest GTM Role': '',\n    'Days Since Post': '',\n    'GTM Gap Score': item['GTM Gap Score'] || '',\n    'ICP Fit': item['ICP Fit'] || '',\n    'Priority': item['Priority'] || '',\n    'One-Liner': item['One-Liner'] || '',\n    'AI Hook': hookText,\n    'Outreach Status': 'Not Started',\n    'Contact LinkedIn': '',\n    'Notes': ''\n  }\n};\n"
+      },
+      "id": "ID",
+      "name": "Attach AI Hook to Company Row",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2016,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "ID",
+          "mode": "list",
+          "cachedResultName": "Y Combinator",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/ID/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 987273948,
+          "mode": "list",ID
+          "cachedResultName": "Master Tracker",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/ID/edit#gid=987273948"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Company Name": "={{ $('Compute GTM Gap Score').item.json['Company Name'] }}",
+            "YC Slug": "={{ $('Compute GTM Gap Score').item.json['YC Slug'] }}",
+            "Batch": "={{ $('Compute GTM Gap Score').item.json.Batch }}",
+            "Status": "={{ $('Compute GTM Gap Score').item.json.Status }}",
+            "Team Size": "={{ $('Compute GTM Gap Score').item.json['Team Size'] }}",
+            "Industry": "={{ $('Compute GTM Gap Score').item.json.Industry }}",
+            "Sub-industry": "={{ $('Compute GTM Gap Score').item.json['Sub-industry'] }}",
+            "Tags": "={{ $('Compute GTM Gap Score').item.json.Tags }}",
+            "Is Hiring": "={{ $('Compute GTM Gap Score').item.json['Is Hiring'] }}",
+            "Stage": "={{ $('Compute GTM Gap Score').item.json.Stage }}",
+            "Top Company": "={{ $('Compute GTM Gap Score').item.json['Top Company'] }}",
+            "Website": "={{ $('Compute GTM Gap Score').item.json.Website }}",
+            "YC Profile URL": "={{ $('Compute GTM Gap Score').item.json['YC Profile URL'] }}",
+            "LinkedIn URL": "={{ $('Compute GTM Gap Score').item.json['LinkedIn URL'] }}",
+            "Crunchbase URL": "={{ $('Compute GTM Gap Score').item.json['Crunchbase URL'] }}",
+            "Regions": "={{ $('Compute GTM Gap Score').item.json.Regions }}",
+            "GTM Gap Score": "={{ $('Compute GTM Gap Score').item.json['GTM Gap Score'] }}",
+            "ICP Fit": "={{ $('Compute GTM Gap Score').item.json['ICP Fit'] }}",
+            "Priority": "={{ $('Compute GTM Gap Score').item.json.Priority }}",
+            "One-Liner": "={{ $('Compute GTM Gap Score').item.json['One-Liner'] }}",
+            "Contact LinkedIn": "={{ $('Compute GTM Gap Score').item.json['Contact LinkedIn'] }}",
+            "Outreach Status": "={{ $('Compute GTM Gap Score').item.json['Outreach Status'] }}",
+            "Notes": "={{ $('Compute GTM Gap Score').item.json.Notes }}",
+            "AI Hook": "={{ $json['AI Hook'] }}",
+            "HubSpot?": "={{ $json['HubSpot?'] }}",
+            "Intercom?": "={{ $json['Intercom?'] }}",
+            "Segment?": "={{ $json['Segment?'] }}",
+            "Mixpanel?": "={{ $json['Mixpanel?'] }}",
+            "GA4?": "={{ $json['GA4?'] }}",
+            "Drift?": "={{ $json['Drift?'] }}",
+            "Apollo?": "={{ $json['Apollo?'] }}",
+            "SalesLoft?": "={{ $json['SalesLoft?'] }}",
+            "Open Roles": "={{ $json['Latest GTM Role'] }}",
+            "Latest GTM Role": "={{ $json['Latest GTM Role'] }}",
+            "GTM Roles": "={{ $json['GTM Roles'] }}",
+            "Days Since Post": "={{ $json['Days Since Post'] }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "Company Name",
+              "displayName": "Company Name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "YC Slug",
+              "displayName": "YC Slug",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Batch",
+              "displayName": "Batch",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Status",
+              "displayName": "Status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Team Size",
+              "displayName": "Team Size",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Industry",
+              "displayName": "Industry",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Sub-industry",
+              "displayName": "Sub-industry",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Tags",
+              "displayName": "Tags",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Is Hiring",
+              "displayName": "Is Hiring",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Stage",
+              "displayName": "Stage",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Top Company",
+              "displayName": "Top Company",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Website",
+              "displayName": "Website",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "YC Profile URL",
+              "displayName": "YC Profile URL",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "LinkedIn URL",
+              "displayName": "LinkedIn URL",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Crunchbase URL",
+              "displayName": "Crunchbase URL",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Regions",
+              "displayName": "Regions",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "HubSpot?",
+              "displayName": "HubSpot?",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Intercom?",
+              "displayName": "Intercom?",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Segment?",
+              "displayName": "Segment?",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Mixpanel?",
+              "displayName": "Mixpanel?",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "GA4?",
+              "displayName": "GA4?",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Drift?",
+              "displayName": "Drift?",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Apollo?",
+              "displayName": "Apollo?",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "SalesLoft?",
+              "displayName": "SalesLoft?",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Open Roles",
+              "displayName": "Open Roles",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "GTM Roles",
+              "displayName": "GTM Roles",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Latest GTM Role",
+              "displayName": "Latest GTM Role",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Days Since Post",
+              "displayName": "Days Since Post",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "GTM Gap Score",
+              "displayName": "GTM Gap Score",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "ICP Fit",
+              "displayName": "ICP Fit",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Priority",
+              "displayName": "Priority",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "One-Liner",
+              "displayName": "One-Liner",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "AI Hook",
+              "displayName": "AI Hook",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Outreach Status",
+              "displayName": "Outreach Status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Contact LinkedIn",
+              "displayName": "Contact LinkedIn",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Notes",
+              "displayName": "Notes",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "d9ea964f-d6c2-44c9-811c-dc9e1014e651",
+      "name": "Append Row to Master Tracker",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        2240,
+        272
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "ID",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "batchSize": 10,
+        "options": {}
+      },
+      "id": "ID",
+      "name": "Process in Batches of 10",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        1120,
+        192
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Weekly Schedule — Sunday 6am": {
+      "main": [
+        [
+          {
+            "node": "Fetch All YC Companies",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch All YC Companies": {
+      "main": [
+        [
+          {
+            "node": "Filter by ICP Criteria",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter by ICP Criteria": {
+      "main": [
+        [
+          {
+            "node": "Read Existing Slugs from Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Existing Slugs from Sheet": {
+      "main": [
+        [
+          {
+            "node": "Remove Already Scraped Companies",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Remove Already Scraped Companies": {
+      "main": [
+        [
+          {
+            "node": "Process in Batches of 10",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compute GTM Gap Score": {
+      "main": [
+        [
+          {
+            "node": "Build Hook Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Hook Prompt": {
+      "main": [
+        [
+          {
+            "node": "Hook Generator",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Hook Generator": {
+      "main": [
+        [
+          {
+            "node": "Attach AI Hook to Company Row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Attach AI Hook to Company Row": {
+      "main": [
+        [
+          {
+            "node": "Append Row to Master Tracker",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Append Row to Master Tracker": {
+      "main": [
+        [
+          {
+            "node": "Process in Batches of 10",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process in Batches of 10": {
+      "main": [
+        [
+          {
+            "node": "Log Completion",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Compute GTM Gap Score",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": true
+  },
+  "versionId": "ID",
+  "meta": {
+    "aiBuilderAssisted": true,
+    "builderVariant": "mcp",
+    "instanceId": "dff72ec769133a889f7c0cfa6daaba222e29e067ccfc0b03f97f3c1f0537be7f"
+  },
+  "id": "ID",
+  "tags": []
+}
